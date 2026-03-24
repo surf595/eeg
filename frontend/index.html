@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EEG Single-File Page</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 12px; background: #f6f7fb; }
+    .layout { display: grid; grid-template-columns: 330px 1fr; gap: 12px; }
+    .panel { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .cards { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 8px; }
+    .card { background:#f1f4fb; border-radius:6px; padding:8px; }
+    #raw, #psd, #spec { height: 320px; }
+    .small { font-size: 12px; color: #666; }
+    textarea { width:100%; min-height:110px; }
+  </style>
+</head>
+<body>
+  <h2>EEG Viewer / Analysis / Comparison</h2>
+  <p class="small">Исследовательский интерфейс. Не является медицинской диагностической системой.</p>
+  <div class="layout">
+    <div class="panel">
+      <div class="row">
+        <button onclick="reindex()">Reindex</button>
+        <button onclick="loadRaw()">Load raw</button>
+      </div>
+      <div class="row"><select id="fileSelect" style="width:100%"></select></div>
+      <div class="row">
+        <label>Amplitude scale <input id="amp" type="number" value="1" step="0.1" style="width:80px"/></label>
+        <button onclick="loadRaw()">Apply</button>
+      </div>
+      <div class="row">
+        <label>Selection start <input id="selStart" type="number" value="0" step="0.1"/></label>
+        <label>end <input id="selEnd" type="number" value="10" step="0.1"/></label>
+      </div>
+      <div class="row"><button onclick="analyzeSelection()">Analyze selection</button></div>
+      <div class="row"><label>Region preset
+        <select id="regionPreset" onchange="applyPreset()">
+          <option value="">all</option>
+          <option value="frontal">frontal</option>
+          <option value="central">central</option>
+          <option value="parietal">parietal</option>
+          <option value="occipital">occipital</option>
+          <option value="temporal">temporal</option>
+        </select>
+      </label></div>
+      <div id="channelsBox" class="small"></div>
+      <hr/>
+      <h4>Text description (RU)</h4>
+      <textarea id="textDesc"></textarea>
+      <div class="row">
+        <button onclick="saveText()">Save edits</button>
+        <button onclick="loadHistory()">History</button>
+      </div>
+      <pre id="history" class="small"></pre>
+      <hr/>
+      <h4>Comparison</h4>
+      <div class="row"><select id="leftFile" style="width:100%"></select></div>
+      <div class="row"><select id="rightFile" style="width:100%"></select></div>
+      <div class="row"><button onclick="compareFiles()">selected vs selected</button></div>
+      <div class="row"><input id="subjectCode" placeholder="subject code"/><button onclick="compareBaselineStim()">baseline vs stimulation</button></div>
+      <pre id="compareOut" class="small"></pre>
+    </div>
+
+    <div class="panel">
+      <h3>Raw EEG (stacked channels)</h3>
+      <div id="raw"></div>
+      <h3>PSD panel</h3>
+      <div id="psd"></div>
+      <h3>Spectrogram panel</h3>
+      <div id="spec"></div>
+      <h3>Metrics</h3>
+      <div class="cards" id="metrics"></div>
+    </div>
+  </div>
+
+<script>
+let files=[]; let rawData=null; let analysisData=null; let visibleChannels=[];
+
+async function init(){ await fetchFiles(); }
+
+async function fetchFiles(){
+  files = await (await fetch('/api/files')).json();
+  const targets=['fileSelect','leftFile','rightFile'];
+  for(const id of targets){
+    const el=document.getElementById(id); el.innerHTML='';
+    files.forEach(f=>{ const o=document.createElement('option'); o.value=f.id; o.textContent=`${f.id} | ${f.file_name} | ${f.subject_code} | ${f.record_type}`; el.appendChild(o);});
+  }
+}
+
+async function reindex(){ await fetch('/api/files/reindex',{method:'POST'}); await fetchFiles(); }
+
+async function loadRaw(){
+  const id=document.getElementById('fileSelect').value;
+  const amp=document.getElementById('amp').value;
+  rawData=await (await fetch(`/api/files/${id}/raw?amplitude_scale=${amp}`)).json();
+  visibleChannels = rawData.channels.slice();
+  renderChannelControls();
+  renderRaw();
+}
+
+function renderChannelControls(){
+  const box=document.getElementById('channelsBox');
+  box.innerHTML='';
+  rawData.channels.forEach(ch=>{
+    const checked=visibleChannels.includes(ch)?'checked':'';
+    box.innerHTML += `<label><input type="checkbox" data-ch="${ch}" ${checked}/> ${ch}</label><br/>`;
+  });
+  box.querySelectorAll('input').forEach(inp=>inp.addEventListener('change',()=>{
+    const ch=inp.getAttribute('data-ch');
+    if(inp.checked){ if(!visibleChannels.includes(ch)) visibleChannels.push(ch); }
+    else { visibleChannels=visibleChannels.filter(x=>x!==ch); }
+    renderRaw();
+  }));
+}
+
+function applyPreset(){
+  const preset=document.getElementById('regionPreset').value;
+  if(!preset || !rawData.region_presets[preset]){ visibleChannels=rawData.channels.slice(); }
+  else { visibleChannels = rawData.channels.filter(ch=>rawData.region_presets[preset].includes(ch)); }
+  renderChannelControls();
+  renderRaw();
+}
+
+function renderRaw(){
+  if(!rawData) return;
+  const traces=[];
+  rawData.stacked.forEach(tr=>{
+    if(!visibleChannels.includes(tr.channel)) return;
+    traces.push({x:rawData.times,y:tr.values,mode:'lines',name:tr.channel,line:{width:1}});
+  });
+  const shapes=[];
+  const s=parseFloat(document.getElementById('selStart').value||0);
+  const e=parseFloat(document.getElementById('selEnd').value||0);
+  shapes.push({type:'line',x0:s,x1:s,y0:0,y1:1,yref:'paper',line:{color:'green',dash:'dot'}});
+  shapes.push({type:'line',x0:e,x1:e,y0:0,y1:1,yref:'paper',line:{color:'red',dash:'dot'}});
+
+  Plotly.newPlot('raw',traces,{dragmode:'zoom',hovermode:'x',shapes});
+  const raw=document.getElementById('raw');
+  raw.on('plotly_relayout',(ev)=>{
+    if(ev['xaxis.range[0]']!==undefined && ev['xaxis.range[1]']!==undefined){
+      document.getElementById('selStart').value = Number(ev['xaxis.range[0]']).toFixed(2);
+      document.getElementById('selEnd').value = Number(ev['xaxis.range[1]']).toFixed(2);
+    }
+  });
+  raw.on('plotly_click',(ev)=>{
+    const x=ev.points[0].x;
+    const cur=parseFloat(document.getElementById('selStart').value);
+    if(Math.abs(x-cur)<0.2) document.getElementById('selStart').value=x.toFixed(2);
+  });
+}
+
+async function analyzeSelection(){
+  const req={
+    file_id:Number(document.getElementById('fileSelect').value),
+    start_sec:Number(document.getElementById('selStart').value),
+    end_sec:Number(document.getElementById('selEnd').value),
+  };
+  analysisData=await (await fetch('/api/analyze-selection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)})).json();
+  renderPSD(); renderSpec(); renderMetrics();
+  document.getElementById('textDesc').value=analysisData.text_description;
+}
+
+function renderPSD(){
+  if(!analysisData) return;
+  const selected=analysisData.psd.selected_channel;
+  const by=analysisData.psd.by_channel;
+  const traces=[];
+  if(by[selected]) traces.push({x:by[selected].freqs,y:by[selected].power,mode:'lines',name:`selected ${selected}`});
+  Object.keys(by).forEach(ch=>{ if(ch!==selected) traces.push({x:by[ch].freqs,y:by[ch].power,mode:'lines',name:ch,opacity:0.25}); });
+  Object.entries(analysisData.psd.region_average).forEach(([r,v])=>{ traces.push({x:v.freqs,y:v.power,mode:'lines',name:`region ${r}`,line:{width:3}}); });
+  Plotly.newPlot('psd',traces,{hovermode:'closest'});
+}
+
+function renderSpec(){
+  if(!analysisData) return;
+  const s=analysisData.spectrogram;
+  Plotly.newPlot('spec',[{x:s.times,y:s.frequencies,z:s.power,type:'heatmap',colorscale:'Viridis'}],
+    {title:`Selected channel spectrogram; region mean power=${s.region_mean_power.toFixed(4)}`});
+}
+
+function renderMetrics(){
+  if(!analysisData) return;
+  const m=analysisData.metrics;
+  const cards=[['PDR',m.PDR],['alpha/theta',m.alpha_theta],['beta/alpha',m.beta_alpha],['artifact burden',m.artifact_burden],['state',m.state_name],['confidence',m.confidence]];
+  document.getElementById('metrics').innerHTML=cards.map(([k,v])=>`<div class='card'><b>${k}</b><div>${typeof v==='number'?v.toFixed(4):v}</div></div>`).join('');
+}
+
+async function saveText(){
+  const payload={file_id:Number(document.getElementById('fileSelect').value),text:document.getElementById('textDesc').value,kind:'manual_edit'};
+  await fetch('/api/text/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  await loadHistory();
+}
+
+async function loadHistory(){
+  const id=document.getElementById('fileSelect').value;
+  const h=await (await fetch(`/api/text/history/${id}`)).json();
+  document.getElementById('history').textContent=JSON.stringify(h,null,2);
+}
+
+async function compareFiles(){
+  const payload={left_file_id:Number(document.getElementById('leftFile').value),right_file_id:Number(document.getElementById('rightFile').value),start_sec:Number(document.getElementById('selStart').value),end_sec:Number(document.getElementById('selEnd').value)};
+  const out=await (await fetch('/api/compare/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+  document.getElementById('compareOut').textContent=JSON.stringify(out,null,2);
+}
+
+async function compareBaselineStim(){
+  const code=document.getElementById('subjectCode').value;
+  const s=document.getElementById('selStart').value; const e=document.getElementById('selEnd').value;
+  const out=await (await fetch(`/api/compare/baseline-stimulation/${code}?start_sec=${s}&end_sec=${e}`)).json();
+  document.getElementById('compareOut').textContent=JSON.stringify(out,null,2);
+}
+
+init();
+</script>
+</body>
+</html>
