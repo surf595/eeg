@@ -54,6 +54,11 @@ class TextSaveRequest(BaseModel):
     kind: str = "manual_edit"
 
 
+class RespondentCompareRequest(BaseModel):
+    mode: str = "age_group"  # age_group | all
+    age_group: str | None = None
+    record_type: str | None = None  # baseline | stimulation
+    stimulation_frequency: str | None = None
 @app.on_event("startup")
 def startup() -> None:
     library.reindex()
@@ -70,6 +75,12 @@ def shutdown() -> None:
 
 @app.on_event("startup")
 def startup() -> None:
+    library.reindex()
+    _start_sync()
+
+
+@app.on_event("shutdown")
+def shutdown() -> None:
 
     library.reindex()
     _start_sync()
@@ -91,6 +102,12 @@ def shutdown() -> None:
 def index_page() -> FileResponse:
     return FileResponse(PROJECT_ROOT / "frontend" / "index.html")
 
+
+
+
+@app.get("/respondents")
+def respondents_page() -> FileResponse:
+    return FileResponse(PROJECT_ROOT / "frontend" / "respondents.html")
 
 @app.post("/api/files/reindex")
 def reindex_files() -> dict:
@@ -226,6 +243,129 @@ def _start_sync() -> None:
 
     _worker = Thread(target=_loop, daemon=True, name="eeg-library-sync")
     _worker.start()
+
+
+@app.post("/api/respondents/compare")
+def compare_respondents_page(req: RespondentCompareRequest) -> dict:
+    rows = [dict(r) for r in db.list_files()]
+
+    if req.record_type:
+        rows = [r for r in rows if r["record_type"] == req.record_type]
+    if req.stimulation_frequency:
+        rows = [r for r in rows if str(r.get("stimulation_frequency", "")) == str(req.stimulation_frequency)]
+
+    for r in rows:
+        r["age_group"] = _age_group(r.get("age", ""))
+
+    if req.mode != "all":
+        if req.age_group:
+            rows = [r for r in rows if r["age_group"] == req.age_group]
+
+    enriched = []
+    for r in rows:
+        file_row = db.get_file(int(r["id"]))
+        path = PROJECT_ROOT / file_row["file_path"]
+        if not path.exists():
+            continue
+        try:
+            data = EDFSignalReader(path).read_all()
+            if data.signals.size == 0:
+                continue
+            fs = float(data.sampling_rates[0])
+            duration = min(20.0, data.signals.shape[1] / fs)
+            res = analyze_selection(
+                data.signals, fs, data.channels, 0.0, duration,
+                record_type=r["record_type"], language="ru"
+            )
+            metrics = res["metrics"]
+            state = res["interpretation"]["state"] if r["record_type"] == "baseline" else ""
+            stim_summary = res["interpretation"]["state"] if r["record_type"] == "stimulation" else ""
+            recommendation = "; ".join(res["interpretation"]["recommendations"])
+            peak_occ = _peak_occ_freq(res["psd"]["region_average"].get("occipital") or res["psd"]["by_channel"].get(res["psd"]["selected_channel"]))
+            score = _clarity_score(metrics)
+            enriched.append({
+                "subject": r["subject_code"],
+                "age": r["age"],
+                "sex": r["sex"],
+                "age_group": r["age_group"],
+                "baseline_state": state,
+                "peak_occ_freq": peak_occ,
+                "alpha_theta": metrics["alpha_theta"],
+                "beta_alpha": metrics["beta_alpha"],
+                "artifact_burden": metrics["artifact_burden"],
+                "stimulation_summary": stim_summary,
+                "recommendation": recommendation,
+                "profile_color": _profile_color(score, metrics["artifact_burden"]),
+                "_score": score,
+            })
+        except Exception:
+            continue
+
+    grouped = {}
+    for e in enriched:
+        grouped.setdefault(e["age_group"], []).append(e)
+    for _, items in grouped.items():
+        items.sort(key=lambda x: x["_score"], reverse=True)
+        for i, item in enumerate(items, start=1):
+            item["rank_within_age_group"] = i
+
+    result = []
+    for items in grouped.values():
+        result.extend(items)
+    result.sort(key=lambda x: (x["age_group"], x.get("rank_within_age_group", 999)))
+    for x in result:
+        x.pop("_score", None)
+
+    return {
+        "default_mode": "age_group",
+        "disclaimer": "Это не рейтинг интеллекта. Это сравнение психофизиологических условий для ясного бодрствования на момент записи.",
+        "rows": result,
+    }
+
+
+def _age_group(age: str) -> str:
+    try:
+        a = int(str(age).strip())
+    except Exception:
+        return "unknown"
+    if a < 18:
+        return "0-17"
+    if a < 30:
+        return "18-29"
+    if a < 45:
+        return "30-44"
+    if a < 60:
+        return "45-59"
+    return "60+"
+
+
+def _peak_occ_freq(psd: dict | None) -> float:
+    if not psd:
+        return 0.0
+    freqs = psd.get("freqs", [])
+    power = psd.get("power", [])
+    if not freqs or not power:
+        return 0.0
+    lo, hi = 7.0, 13.5
+    idx = [i for i, f in enumerate(freqs) if lo <= f <= hi]
+    if not idx:
+        return 0.0
+    best = max(idx, key=lambda i: power[i])
+    return float(freqs[best])
+
+
+def _clarity_score(metrics: dict) -> float:
+    return float((metrics["PDR"] * 1.4 + metrics["alpha_theta"] * 0.7 - metrics["beta_alpha"] * 0.35 - metrics["artifact_burden"] * 1.8))
+
+
+def _profile_color(score: float, artifact: float) -> str:
+    if artifact >= 0.75:
+        return "gray"
+    if score >= 0.8:
+        return "green"
+    if score >= 0.2:
+        return "yellow"
+    return "orange"
 def _start_sync() -> None:
     global _worker
     if _worker and _worker.is_alive():
