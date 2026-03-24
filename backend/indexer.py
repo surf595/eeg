@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+
+from .eeg_library import EEGLibraryService, ReindexResult
+
+# Compatibility alias for previous code paths.
+EEGIndexer = EEGLibraryService
+IndexingResult = ReindexResult
+
 import hashlib
 import json
 from dataclasses import dataclass
@@ -102,3 +109,4 @@ class EEGIndexer:
         for separator in ("_baseline", "_stimulation", "-baseline", "-stimulation"):
             stem = stem.replace(separator, "")
         return stem
+

@@ -1,5 +1,20 @@
 from __future__ import annotations
 
+
+from threading import Event, Thread
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .config import BACKGROUND_SYNC_SECONDS, DATABASE_PATH, PRIMARY_LIBRARY_PATH
+from .db import EEGDatabase
+from .eeg_library import EEGLibraryService
+
+db = EEGDatabase(DATABASE_PATH)
+library = EEGLibraryService(PRIMARY_LIBRARY_PATH, db)
+
+app = FastAPI(title="EEG Library Module")
+
 import json
 from pathlib import Path
 
@@ -18,12 +33,17 @@ from .service import EEGService
 service = EEGService()
 app = FastAPI(title="EEG Research Workspace")
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+_stop_event = Event()
+_worker: Thread | None = None
 
 frontend_dir = PROJECT_ROOT / "frontend"
 app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
@@ -44,14 +64,50 @@ class CompareRequest(BaseModel):
     duration_sec: float = Field(default=10.0, gt=0)
 
 
+
 @app.on_event("startup")
 def startup() -> None:
+
+    library.reindex()
+    _start_sync()
+
     service.initial_scan()
     service.start_background_sync()
 
 
+
 @app.on_event("shutdown")
 def shutdown() -> None:
+
+    _stop_event.set()
+    if _worker and _worker.is_alive():
+        _worker.join(timeout=1)
+
+
+@app.post("/api/files/reindex")
+def reindex_files() -> dict:
+    result = library.reindex()
+    return {"scanned": result.scanned, "inserted_or_updated": result.inserted_or_updated}
+
+
+@app.get("/api/files")
+def list_files() -> list[dict]:
+    return [dict(row) for row in db.list_files()]
+
+
+def _start_sync() -> None:
+    global _worker
+    if _worker and _worker.is_alive():
+        return
+    _stop_event.clear()
+
+    def _loop() -> None:
+        while not _stop_event.wait(BACKGROUND_SYNC_SECONDS):
+            library.reindex()
+
+    _worker = Thread(target=_loop, daemon=True, name="eeg-library-sync")
+    _worker.start()
+=======
     service.stop_background_sync()
 
 
@@ -191,3 +247,4 @@ def _build_comparison(left: dict, right: dict, mode: str) -> dict:
             f"Largest absolute delta metric: {max(metric_delta, key=lambda k: abs(metric_delta[k]))}."
         ),
     }
+
