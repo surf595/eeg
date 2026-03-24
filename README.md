@@ -80,6 +80,19 @@ cd frontend
 npm install
 npm run dev
 ```
+
+
+## Configuration
+
+Copy `.env.example` to `.env` if needed.
+
+Default MVP value:
+
+```env
+EEG_DATA_DIR=./eeg
+```
+
+On first backend start, the app recursively scans this folder, indexes files into DB, and exposes them in the UI catalog.
 # EEG Single-file Page
 
 Источник данных: локальная библиотека `./eeg`.
