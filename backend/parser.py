@@ -76,6 +76,48 @@ class BrainWinReader(BaseReader):
     def parse(self, path: Path) -> ParsedMetadata:
         # BrainWin-like fallback when standard EDF header is broken/non-standard.
         size = path.stat().st_size if path.exists() else 0
+class EEGMetadataParser:
+    def parse(self, path: Path) -> ParsedMetadata:
+        parsed = self._parse_standard_edf(path)
+        if parsed:
+            return parsed
+        return self._parse_brainwin_like(path)
+
+    def _parse_standard_edf(self, path: Path) -> ParsedMetadata | None:
+        if pyedflib is None:
+            return None
+        try:
+            with pyedflib.EdfReader(str(path)) as edf:
+                labels = edf.getSignalLabels()
+                fs = float(edf.getSampleFrequency(0)) if labels else 0.0
+                n_samples = int(edf.getNSamples()[0]) if labels else 0
+                duration = float(n_samples / fs) if fs else 0.0
+
+                patient = (edf.getPatientCode() or "").strip()
+                sex = (edf.getSex() or "").strip().upper() or "U"
+                age = str(edf.getAge()) if edf.getAge() not in (None, "") else ""
+                recording = (edf.getRecordingAdditional() or "").strip().lower()
+
+                return ParsedMetadata(
+                    parser_status="ok",
+                    parser_type="edf_standard",
+                    file_name=path.name,
+                    subject_code=patient or self._subject_from_name(path),
+                    age=age,
+                    sex=sex,
+                    record_type=self._record_type(path, recording),
+                    stimulation_frequency=self._stim_freq(path.name),
+                    duration=duration,
+                    sampling_rate=fs,
+                    n_channels=len(labels),
+                )
+        except Exception:
+            return None
+
+    def _parse_brainwin_like(self, path: Path) -> ParsedMetadata:
+        # BrainWin-like EDF may contain broken/non-standard header fields.
+        # Fallback strategy extracts conservative metadata from file naming + byte length.
+        size = path.stat().st_size
         sampling = 0.0
         channels = 0
         duration = 0.0
@@ -89,6 +131,7 @@ class BrainWinReader(BaseReader):
             channels = int(guessed_channels.group(1))
 
         if sampling > 0 and channels > 0 and size > 0:
+        if sampling > 0 and channels > 0:
             approx_samples = size / 2 / channels
             duration = approx_samples / sampling
 
@@ -101,6 +144,11 @@ class BrainWinReader(BaseReader):
             sex=_extract_sex(path.stem),
             record_type=_record_type(path, path.stem.lower()),
             stimulation_frequency=_stim_freq(path.stem),
+            subject_code=self._subject_from_name(path),
+            age=self._extract_age(path.stem),
+            sex=self._extract_sex(path.stem),
+            record_type=self._record_type(path, path.stem.lower()),
+            stimulation_frequency=self._stim_freq(path.stem),
             duration=duration,
             sampling_rate=sampling,
             n_channels=channels,
@@ -165,3 +213,37 @@ def _record_type(path: Path, text: str) -> str:
 def _stim_freq(text: str) -> str:
     match = re.search(r"(\d+(?:\.\d+)?)\s*hz", text, re.IGNORECASE)
     return match.group(1) if match else ""
+    @staticmethod
+    def _subject_from_name(path: Path) -> str:
+        base = re.split(r"[_\-.]", path.stem)[0]
+        return base or "unknown"
+
+    @staticmethod
+    def _extract_age(text: str) -> str:
+        match = re.search(r"(?:age|a)(\d{1,3})", text, re.IGNORECASE)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _extract_sex(text: str) -> str:
+        low = text.lower()
+        if re.search(r"(?:^|[_\-.])m(?:ale)?(?:$|[_\-.])", low):
+            return "M"
+        if re.search(r"(?:^|[_\-.])f(?:emale)?(?:$|[_\-.])", low):
+            return "F"
+        return "U"
+
+    @staticmethod
+    def _record_type(path: Path, text: str) -> str:
+        haystack = f"{path.stem.lower()} {text}"
+        if "baseline" in haystack:
+            return "baseline"
+        if "stim" in haystack:
+            return "stimulation"
+        if "deident" in haystack or "anon" in haystack:
+            return "deidentified"
+        return "unknown"
+
+    @staticmethod
+    def _stim_freq(text: str) -> str:
+        match = re.search(r"(\d+(?:\.\d+)?)\s*hz", text, re.IGNORECASE)
+        return match.group(1) if match else ""
