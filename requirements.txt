@@ -3,3 +3,8 @@ uvicorn==0.35.0
 pyedflib==0.1.42
 numpy==2.2.6
 scipy==1.15.3
+
+numpy==2.2.6
+scipy==1.15.3
+
+pyedflib==0.1.42
