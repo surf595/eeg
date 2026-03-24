@@ -93,6 +93,15 @@ EEG_DATA_DIR=./eeg
 ```
 
 On first backend start, the app recursively scans this folder, indexes files into DB, and exposes them in the UI catalog.
+
+
+## Seed / index command
+
+```bash
+python -m backend.app.index_eeg_library
+```
+
+This command scans `EEG_DATA_DIR` (`./eeg` by default), recursively indexes EEG files, updates DB records, and logs skipped/failed files.
 # EEG Single-file Page
 
 Источник данных: локальная библиотека `./eeg`.
