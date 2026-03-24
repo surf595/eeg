@@ -57,6 +57,10 @@
       </div>
       <pre id="history" class="small"></pre>
       <hr/>
+      <h4>Export</h4>
+      <div class="row"><button onclick="downloadExport('csv')">CSV</button><button onclick="downloadExport('xlsx')">XLSX</button><button onclick="downloadExport('json')">JSON</button><button onclick="downloadExport('pdf')">PDF</button><button onclick="downloadExport('png')">PNG charts</button></div>
+      <div class="row"><button onclick="downloadSubjectReport()">Subject-level PDF</button></div>
+      <hr/>
       <h4>Comparison</h4>
       <div class="row"><select id="leftFile" style="width:100%"></select></div>
       <div class="row"><select id="rightFile" style="width:100%"></select></div>
@@ -217,6 +221,12 @@ async function compareBaselineStim(){
   document.getElementById('compareOut').textContent=JSON.stringify(out,null,2);
 }
 
+function downloadExport(fmt){ const id=document.getElementById('fileSelect').value; window.open(`/api/export/file/${id}?format=${fmt}`,'_blank'); }
+function downloadSubjectReport(){ const id=document.getElementById('fileSelect').value; const f=files.find(x=>String(x.id)===String(id)); if(!f) return; window.open(`/api/export/subject/${f.subject_code}`,'_blank'); }
+
+init();
+</script>
+</body>
 init();
 </script>
 </body>

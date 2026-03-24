@@ -192,3 +192,17 @@ def _region_average(psd_by_channel: dict[str, dict[str, list[float]]]) -> dict[s
         power_stack = np.vstack([np.asarray(x["power"]) for x in matched])
         result[region] = {"freqs": freqs.tolist(), "power": power_stack.mean(axis=0).tolist()}
     return result
+
+
+def clarity_score(metrics: dict) -> float:
+    return float((metrics["PDR"] * 1.4 + metrics["alpha_theta"] * 0.7 - metrics["beta_alpha"] * 0.35 - metrics["artifact_burden"] * 1.8))
+
+
+def profile_color(score: float, artifact: float) -> str:
+    if artifact >= 0.75:
+        return "gray"
+    if score >= 0.8:
+        return "green"
+    if score >= 0.2:
+        return "yellow"
+    return "orange"

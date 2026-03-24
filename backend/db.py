@@ -277,3 +277,10 @@ class EEGDatabase:
                 "SELECT id, kind, description, created_at FROM text_descriptions WHERE file_id = ? ORDER BY id DESC",
                 (file_id,),
             ).fetchall()
+
+    def add_feature_set(self, *, file_id: int, segment_start: float, segment_end: float, features_json: str, created_at: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO eeg_feature_sets(file_id, segment_start, segment_end, features_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                (file_id, segment_start, segment_end, features_json, created_at),
+            )
