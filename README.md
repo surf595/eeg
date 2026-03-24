@@ -1,85 +1,66 @@
-codex/implement-eeg-file-indexing-in-backend-hjtrsr
-# EEG Library Module
+# EEG Single-file Page
 
-Источник данных: локальная папка `./eeg` (primary data library).
+Источник данных: локальная библиотека `./eeg`.
 
 ## Что реализовано
 
-### 1) File scanner
-- Рекурсивное сканирование `./eeg`.
-- Поиск только `.EDF`/`.edf` (case-insensitive).
-- Non-EEG файлы игнорируются.
+- Backend EEG Library (сканер, реестр, metadata extraction, reindex).
+- Single-file web page `frontend/index.html` для просмотра/анализа/сравнения EEG.
 
-### 2) File registry
-Для каждого файла в реестре хранятся:
-- hash файла;
-- размер;
-- дата модификации;
-- parser status;
-- parser type.
+## Страница включает
 
-### 3) Metadata extraction
-Извлекаются поля:
-- file_name;
-- subject code;
-- age;
-- sex;
-- record_type;
-- stimulation frequency;
-- duration;
-- sampling rate;
-- n_channels.
+1. Raw EEG viewer
+   - stacked channels
+   - zoom/pan
+   - time cursor + start/end markers
+   - amplitude scale
+   - channel show/hide
+   - presets by region
 
-Поддержка:
-- стандартный EDF parser (`edf_standard`);
-- fallback parser для BrainWin-like EDF с нестандартным заголовком (`brainwin_like`).
+2. Interval selection
+   - выделение через zoom по оси времени
+   - start/end markers
+   - Analyze selection
+   - пересчёт PSD/spectrogram/metrics/text
 
-### 4) Reindex flow
-- endpoint: `POST /api/files/reindex`
-- повторное сканирование `./eeg`
-- добавление новых файлов
-- обновление изменённых
-- без дублирования
+3. PSD panel
+   - selected channel
+   - multi-channel overlay
+   - region average
 
-Дополнительно:
-- `GET /api/files` — список файлов из реестра.
+4. Spectrogram panel
+   - selected channel
+   - region mean
+   - hover (time/frequency/power)
 
-### 5) Database entities
-Созданы сущности:
-- Subject (`subjects`)
-- EEGFile (`eeg_files`)
-- EEGChannel (`eeg_channels`)
-- EEGAnnotation (`eeg_annotations`)
-- EEGFeatureSet (`eeg_feature_sets`)
-- TextDescription (`text_descriptions`)
+5. Metrics panel
+   - PDR
+   - alpha/theta
+   - beta/alpha
+   - artifact burden
+   - state name
+   - confidence
 
-# EEG Research Workspace
+6. Text description panel
+   - generated description (RU)
+   - editable
+   - save edits
+   - version history
 
-Локальная папка `./eeg` используется как **primary data library** проекта.
+7. Comparison panel
+   - baseline vs stimulation (same respondent)
+   - selected file vs selected file
 
-## Что делает backend
+## API
 
-- При старте автоматически сканирует `./eeg`.
-- Рекурсивно индексирует `.edf` и `.EDF`.
-- Для каждого файла вычисляет SHA-256, извлекает EDF metadata, определяет тип записи (`baseline`, `stimulation`, `deidentified`, `unknown`) и сохраняет в SQLite.
-- Не дублирует уже проиндексированные файлы.
-- Поддерживает ручной `reindex` и фоновую синхронизацию для новых файлов.
-
-## Веб-приложение (исследовательский интерфейс)
-
-- Просмотр сырых EEG-сигналов выбранного интервала.
-- Перерасчёт признаков по выделенному сегменту.
-- PSD, spectrogram, band powers, derived metrics.
-- Осторожное автоматически сгенерированное психофизиологическое описание (не клинический диагноз).
-- Сравнение респондент vs респондент.
-- Сравнение baseline vs stimulation для одного респондента.
-- Экспорт результатов в JSON/CSV.
-
-## Важно
-
-Этот интерфейс предназначен для исследовательской и экспертной работы.
-**Не является медицинской диагностической системой.**
-
+- `POST /api/files/reindex`
+- `GET /api/files`
+- `GET /api/files/{file_id}/raw`
+- `POST /api/analyze-selection`
+- `POST /api/text/save`
+- `GET /api/text/history/{file_id}`
+- `GET /api/compare/baseline-stimulation/{subject_code}`
+- `POST /api/compare/files`
 
 ## Запуск
 
@@ -88,13 +69,4 @@ pip install -r requirements.txt
 uvicorn backend.app:app --reload
 ```
 
-codex/implement-eeg-file-indexing-in-backend-hjtrsr
-
 Откройте: `http://127.0.0.1:8000/`
-
-
-## Ручной reindex
-
-```bash
-python -m backend.cli reindex
-```

@@ -236,3 +236,44 @@ class EEGDatabase:
                 ORDER BY f.file_path
                 """
             ).fetchall()
+
+    def get_file(self, file_id: int):
+        with self._connect() as conn:
+            return conn.execute(
+                """
+                SELECT f.*, s.code AS subject_code
+                FROM eeg_files f JOIN subjects s ON s.id=f.subject_id
+                WHERE f.id = ?
+                """,
+                (file_id,),
+            ).fetchone()
+
+    def find_baseline_stimulation_pair(self, subject_code: str):
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT f.id, f.file_path, f.record_type
+                FROM eeg_files f
+                JOIN subjects s ON s.id=f.subject_id
+                WHERE s.code = ? AND f.record_type IN ('baseline', 'stimulation')
+                ORDER BY f.file_path
+                """,
+                (subject_code,),
+            ).fetchall()
+            baseline = next((r for r in rows if r['record_type'] == 'baseline'), None)
+            stimulation = next((r for r in rows if r['record_type'] == 'stimulation'), None)
+            return baseline, stimulation
+
+    def add_text_description(self, *, file_id: int, kind: str, description: str, created_at: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO text_descriptions(file_id, kind, description, created_at) VALUES (?, ?, ?, ?)",
+                (file_id, kind, description, created_at),
+            )
+
+    def get_text_history(self, file_id: int) -> list[sqlite3.Row]:
+        with self._connect() as conn:
+            return conn.execute(
+                "SELECT id, kind, description, created_at FROM text_descriptions WHERE file_id = ? ORDER BY id DESC",
+                (file_id,),
+            ).fetchall()
