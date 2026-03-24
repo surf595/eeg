@@ -19,6 +19,7 @@
 </head>
 <body>
   <h2>EEG Viewer / Analysis / Comparison</h2><p><a href="/respondents">Открыть страницу сравнения респондентов</a></p>
+  <h2>EEG Viewer / Analysis / Comparison</h2>
   <p class="small">Исследовательский интерфейс. Не является медицинской диагностической системой.</p>
   <div class="layout">
     <div class="panel">
@@ -219,4 +220,139 @@ async function compareBaselineStim(){
 init();
 </script>
 </body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EEG Research Workspace</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 20px; background: #f7f8fa; }
+      .grid { display: grid; grid-template-columns: 350px 1fr; gap: 16px; }
+      .panel { background: white; border-radius: 8px; padding: 14px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+      .muted { color: #666; font-size: 0.9em; }
+      button { margin-top: 8px; }
+      #raw, #psd, #spectrogram { height: 280px; }
+      pre { background: #f0f2f5; padding: 12px; border-radius: 6px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h2>EEG Research & Expert Interface</h2>
+    <p class="muted">Внимание: это исследовательский интерфейс и экспертная поддержка, не медицинская диагностическая система.</p>
+    <div class="grid">
+      <div class="panel">
+        <h3>Библиотека EEG</h3>
+        <button onclick="reindex()">Reindex</button>
+        <select id="fileSelect" style="width:100%;margin-top:8px"></select>
+        <label>Канал <select id="channelSelect" style="width:100%"></select></label>
+        <label>Старт (сек) <input id="startSec" type="number" value="0" min="0" style="width:100%" /></label>
+        <label>Длительность (сек) <input id="durSec" type="number" value="10" min="1" style="width:100%" /></label>
+        <button onclick="analyze()">Анализ выделенного интервала</button>
+        <hr />
+        <h4>Сравнение</h4>
+        <label>Файл A <select id="leftFile" style="width:100%"></select></label>
+        <label>Файл B <select id="rightFile" style="width:100%"></select></label>
+        <button onclick="compareRespondents()">Сравнить респондентов</button>
+      </div>
+      <div class="panel">
+        <div id="raw"></div>
+        <div id="psd"></div>
+        <div id="spectrogram"></div>
+        <h4>Band powers</h4>
+        <pre id="bands"></pre>
+        <h4>Derived metrics</h4>
+        <pre id="metrics"></pre>
+        <h4>Авто-описание</h4>
+        <pre id="narrative"></pre>
+      </div>
+    </div>
+
+    <script>
+      let files = [];
+      async function fetchFiles() {
+        const resp = await fetch('/library/files');
+        files = await resp.json();
+        const sel = document.getElementById('fileSelect');
+        const left = document.getElementById('leftFile');
+        const right = document.getElementById('rightFile');
+        for (const el of [sel, left, right]) {
+          el.innerHTML = '';
+          files.forEach(f => {
+            const opt = document.createElement('option');
+            opt.value = f.id;
+            opt.textContent = `${f.id}: ${f.file_path} [${f.recording_type}] (${f.subject_id})`;
+            el.appendChild(opt);
+          });
+        }
+        if (files.length) await loadChannels();
+      }
+
+      async function loadChannels() {
+        const id = document.getElementById('fileSelect').value;
+        const resp = await fetch(`/library/file/${id}/channels`);
+        const data = await resp.json();
+        const sel = document.getElementById('channelSelect');
+        sel.innerHTML = '';
+        data.channels.forEach(ch => {
+          const opt = document.createElement('option');
+          opt.value = ch;
+          opt.textContent = ch;
+          sel.appendChild(opt);
+        });
+      }
+
+      async function reindex() {
+        await fetch('/library/reindex', { method: 'POST' });
+        await fetchFiles();
+      }
+
+      async function analyze() {
+        const payload = {
+          file_id: Number(document.getElementById('fileSelect').value),
+          channel: document.getElementById('channelSelect').value,
+          start_sec: Number(document.getElementById('startSec').value),
+          duration_sec: Number(document.getElementById('durSec').value),
+        };
+        const resp = await fetch('/analysis/segment', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        drawAnalysis(data);
+      }
+
+      async function compareRespondents() {
+        const payload = {
+          left_file_id: Number(document.getElementById('leftFile').value),
+          right_file_id: Number(document.getElementById('rightFile').value),
+          channel: document.getElementById('channelSelect').value,
+          start_sec: Number(document.getElementById('startSec').value),
+          duration_sec: Number(document.getElementById('durSec').value),
+        };
+        const resp = await fetch('/compare/respondents', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        document.getElementById('narrative').textContent = JSON.stringify(data, null, 2);
+      }
+
+      function drawAnalysis(data) {
+        Plotly.newPlot('raw', [{ x: data.raw.times, y: data.raw.values, mode: 'lines', name: 'Raw EEG' }],
+          { title: `Raw EEG: ${data.file_path} (${data.channel})` });
+        Plotly.newPlot('psd', [{ x: data.analysis.psd_freqs, y: data.analysis.psd_values, mode: 'lines', name: 'PSD' }],
+          { title: 'Power Spectral Density', xaxis: { title: 'Hz' }, yaxis: { title: 'Power' } });
+        Plotly.newPlot('spectrogram', [{
+            x: data.analysis.spectrogram_times,
+            y: data.analysis.spectrogram_freqs,
+            z: data.analysis.spectrogram_values,
+            type: 'heatmap', colorscale: 'Viridis'
+          }], { title: 'Spectrogram', xaxis: { title: 'Time (s)' }, yaxis: { title: 'Hz' } });
+
+        document.getElementById('bands').textContent = JSON.stringify(data.analysis.band_powers, null, 2);
+        document.getElementById('metrics').textContent = JSON.stringify(data.analysis.derived_metrics, null, 2);
+        document.getElementById('narrative').textContent = data.analysis.narrative + '\n\n' + data.disclaimer;
+      }
+
+      document.getElementById('fileSelect').addEventListener('change', loadChannels);
+      fetchFiles();
+    </script>
+  </body>
 </html>
