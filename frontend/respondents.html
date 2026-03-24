@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Сравнение респондентов EEG</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:16px;background:#f6f7fb}
+    .panel{background:#fff;padding:12px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid #ddd;padding:6px;font-size:13px}
+    th{background:#f1f4fb}
+    .green{background:#dff5e2}.yellow{background:#fff6cc}.orange{background:#ffe5cc}.gray{background:#e5e7eb}
+    .small{font-size:12px;color:#555}
+  </style>
+</head>
+<body>
+  <h2>Страница сравнения респондентов</h2>
+  <p class="small"><b>Важно:</b> это не рейтинг интеллекта, а сравнение психофизиологических условий для ясного бодрствования на момент записи.</p>
+  <div class="panel">
+    <label>Scope
+      <select id="mode">
+        <option value="age_group">within age-group (default)</option>
+        <option value="all">all respondents</option>
+      </select>
+    </label>
+    <label>Age group <input id="age_group" placeholder="18-29 / 30-44 ..."/></label>
+    <label>Record type
+      <select id="record_type">
+        <option value="">all</option>
+        <option value="baseline">only baseline</option>
+        <option value="stimulation">only stimulation</option>
+      </select>
+    </label>
+    <label>Stimulation frequency <input id="stim_freq" placeholder="e.g. 10"/></label>
+    <button onclick="loadTable()">Apply filters</button>
+
+    <table id="tbl">
+      <thead>
+        <tr>
+          <th>subject</th><th>age</th><th>sex</th><th>age_group</th><th>baseline_state</th>
+          <th>peak_occ_freq</th><th>alpha/theta</th><th>beta/alpha</th><th>artifact_burden</th>
+          <th>rank within age group</th><th>stimulation summary</th><th>recommendation</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+<script>
+async function loadTable(){
+  const payload={
+    mode:document.getElementById('mode').value,
+    age_group:document.getElementById('age_group').value||null,
+    record_type:document.getElementById('record_type').value||null,
+    stimulation_frequency:document.getElementById('stim_freq').value||null,
+  };
+  const data=await (await fetch('/api/respondents/compare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})).json();
+  const tb=document.querySelector('#tbl tbody'); tb.innerHTML='';
+  data.rows.forEach(r=>{
+    const tr=document.createElement('tr'); tr.className=r.profile_color;
+    tr.innerHTML=`<td>${r.subject}</td><td>${r.age||''}</td><td>${r.sex||''}</td><td>${r.age_group}</td><td>${r.baseline_state||''}</td>`+
+                 `<td>${Number(r.peak_occ_freq||0).toFixed(2)}</td><td>${Number(r.alpha_theta||0).toFixed(3)}</td><td>${Number(r.beta_alpha||0).toFixed(3)}</td><td>${Number(r.artifact_burden||0).toFixed(3)}</td>`+
+                 `<td>${r.rank_within_age_group||''}</td><td>${r.stimulation_summary||''}</td><td>${r.recommendation||''}</td>`;
+    tb.appendChild(tr);
+  });
+}
+loadTable();
+</script>
+</body>
+</html>
