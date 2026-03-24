@@ -102,6 +102,33 @@ python -m backend.app.index_eeg_library
 ```
 
 This command scans `EEG_DATA_DIR` (`./eeg` by default), recursively indexes EEG files, updates DB records, and logs skipped/failed files.
+
+
+## Local run requirements
+
+1. EEG dataset is already located in `./eeg`
+2. Start Postgres and Redis
+3. Run backend
+4. Run reindex command
+5. Start frontend
+6. Open catalog and view indexed EEG files
+
+Quick start script:
+
+```bash
+./scripts/local_run.sh
+```
+
+Or manual:
+
+```bash
+docker compose up -d postgres redis
+uvicorn backend.main:app --reload
+python -m backend.app.index_eeg_library
+cd frontend && npm install && npm run dev
+```
+
+Catalog: `http://127.0.0.1:3000/catalog`
 # EEG Single-file Page
 
 Источник данных: локальная библиотека `./eeg`.

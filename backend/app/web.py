@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import logging
 from pathlib import Path
 from threading import Event, Thread
 
@@ -33,6 +34,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 _stop_event = Event()
 _worker: Thread | None = None
+logger = logging.getLogger("backend.app")
 
 
 class AnalyzeRequest(BaseModel):
@@ -64,6 +66,8 @@ class RespondentCompareRequest(BaseModel):
 
 @app.on_event("startup")
 def startup() -> None:
+    logger.info("Using EEG_DATA_DIR=%s", PRIMARY_LIBRARY_PATH)
+    logger.info("No manual upload required: auto-indexing local library on startup")
     library.reindex()
     _start_sync()
 
