@@ -6,6 +6,7 @@ from threading import Event, Thread
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,15 @@ from .db import EEGDatabase
 from .edf_reader import EDFSignalReader
 from .eeg_library import EEGLibraryService
 from .signal_analysis import analyze_selection
+from .exporter import (
+    build_analysis_bundle,
+    export_csv,
+    export_json_bundle,
+    export_pdf_report,
+    export_png_charts,
+    export_subject_pdf,
+    export_xlsx,
+)
 
 db = EEGDatabase(DATABASE_PATH)
 library = EEGLibraryService(PRIMARY_LIBRARY_PATH, db)
@@ -244,6 +254,67 @@ def _start_sync() -> None:
     _worker = Thread(target=_loop, daemon=True, name="eeg-library-sync")
     _worker.start()
 
+
+
+
+@app.get("/api/export/file/{file_id}")
+def export_file_report(file_id: int, format: str = "json"):
+    row = db.get_file(file_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="File not found")
+    path = PROJECT_ROOT / row["file_path"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File missing on disk")
+
+    bundle = build_analysis_bundle(dict(row), path)
+
+    if format == "csv":
+        data = export_csv(bundle)
+        return Response(data, media_type="text/csv", headers={"Content-Disposition": f"attachment; filename=file_{file_id}_analysis.csv"})
+    if format == "xlsx":
+        data = export_xlsx(bundle)
+        return Response(data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f"attachment; filename=file_{file_id}_analysis.xlsx"})
+    if format == "json":
+        data = export_json_bundle(bundle)
+        return Response(data, media_type="application/json", headers={"Content-Disposition": f"attachment; filename=file_{file_id}_analysis.json"})
+    if format == "pdf":
+        data = export_pdf_report(bundle)
+        return Response(data, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=file_{file_id}_report.pdf"})
+    if format == "png":
+        data = export_png_charts(bundle)
+        return Response(data, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename=file_{file_id}_charts.zip"})
+
+    raise HTTPException(status_code=400, detail="Supported formats: csv, xlsx, json, pdf, png")
+
+
+@app.get("/api/export/subject/{subject_code}")
+def export_subject_report(subject_code: str) -> Response:
+    rows = [dict(r) for r in db.list_files() if r["subject_code"] == subject_code]
+    if not rows:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    baseline = next((r for r in rows if r["record_type"] == "baseline"), None)
+    stimulation = next((r for r in rows if r["record_type"] == "stimulation"), None)
+
+    baseline_bundle = None
+    stimulation_bundle = None
+    if baseline:
+        baseline_row = db.get_file(int(baseline["id"]))
+        baseline_path = PROJECT_ROOT / baseline_row["file_path"]
+        if baseline_path.exists():
+            baseline_bundle = build_analysis_bundle(dict(baseline_row), baseline_path)
+    if stimulation:
+        stimulation_row = db.get_file(int(stimulation["id"]))
+        stimulation_path = PROJECT_ROOT / stimulation_row["file_path"]
+        if stimulation_path.exists():
+            stimulation_bundle = build_analysis_bundle(dict(stimulation_row), stimulation_path)
+
+    age_group = _age_group((baseline or stimulation or rows[0]).get("age", ""))
+    compare_payload = compare_respondents_page(RespondentCompareRequest(mode="age_group", age_group=age_group))
+    age_rows = compare_payload["rows"]
+
+    pdf = export_subject_pdf(subject_code, baseline_bundle, stimulation_bundle, age_rows)
+    return Response(pdf, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=subject_{subject_code}_report.pdf"})
 
 @app.post("/api/respondents/compare")
 def compare_respondents_page(req: RespondentCompareRequest) -> dict:
