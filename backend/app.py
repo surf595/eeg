@@ -29,6 +29,7 @@ class AnalyzeRequest(BaseModel):
     file_id: int
     start_sec: float = Field(ge=0)
     end_sec: float = Field(gt=0)
+    language: str = "ru"
 
 
 class CompareRequest(BaseModel):
@@ -124,7 +125,15 @@ def analyze(req: AnalyzeRequest) -> dict:
         raise HTTPException(status_code=400, detail="No channels available")
     fs = float(data.sampling_rates[0])
 
-    result = analyze_selection(data.signals, fs, data.channels, req.start_sec, req.end_sec)
+    result = analyze_selection(
+        data.signals,
+        fs,
+        data.channels,
+        req.start_sec,
+        req.end_sec,
+        record_type=row["record_type"],
+        language=req.language,
+    )
     db.add_text_description(
         file_id=req.file_id,
         kind="auto_generated",

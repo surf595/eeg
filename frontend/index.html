@@ -35,7 +35,7 @@
         <label>Selection start <input id="selStart" type="number" value="0" step="0.1"/></label>
         <label>end <input id="selEnd" type="number" value="10" step="0.1"/></label>
       </div>
-      <div class="row"><button onclick="analyzeSelection()">Analyze selection</button></div>
+      <div class="row"><label>Language <select id="lang"><option value="ru">ru</option><option value="en">en</option></select></label><button onclick="analyzeSelection()">Analyze selection</button></div>
       <div class="row"><label>Region preset
         <select id="regionPreset" onchange="applyPreset()">
           <option value="">all</option>
@@ -73,6 +73,7 @@
       <div id="spec"></div>
       <h3>Metrics</h3>
       <div class="cards" id="metrics"></div>
+      <h3>Interpretation</h3><pre id="interp" class="small"></pre>
     </div>
   </div>
 
@@ -157,10 +158,12 @@ async function analyzeSelection(){
     file_id:Number(document.getElementById('fileSelect').value),
     start_sec:Number(document.getElementById('selStart').value),
     end_sec:Number(document.getElementById('selEnd').value),
+    language:document.getElementById('lang').value,
   };
   analysisData=await (await fetch('/api/analyze-selection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(req)})).json();
   renderPSD(); renderSpec(); renderMetrics();
   document.getElementById('textDesc').value=analysisData.text_description;
+  document.getElementById('interp').textContent=JSON.stringify(analysisData.interpretation,null,2);
 }
 
 function renderPSD(){
