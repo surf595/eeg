@@ -33,10 +33,12 @@ class EEGIndexer:
             file_hash = self._sha256(file_path)
             metadata = self._parse_edf_metadata(file_path)
             recording_type = self._recording_type(file_path, metadata)
+            subject_id = self._subject_id(file_path, metadata)
             timestamp = datetime.now(UTC).isoformat()
             updated = self.database.upsert_file(
                 file_path=str(file_path.relative_to(self.library_path.parent)),
                 file_hash=file_hash,
+                subject_id=subject_id,
                 recording_type=recording_type,
                 metadata_json=json.dumps(metadata, ensure_ascii=False),
                 timestamp=timestamp,
@@ -90,3 +92,13 @@ class EEGIndexer:
         if any(marker in haystack for marker in ("deidentified", "de-identified", "anon", "anonym")):
             return "deidentified"
         return "unknown"
+
+    @staticmethod
+    def _subject_id(path: Path, metadata: dict[str, str]) -> str:
+        patient_id = metadata.get("patient_id", "").strip()
+        if patient_id:
+            return patient_id
+        stem = path.stem.lower()
+        for separator in ("_baseline", "_stimulation", "-baseline", "-stimulation"):
+            stem = stem.replace(separator, "")
+        return stem

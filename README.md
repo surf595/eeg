@@ -1,23 +1,40 @@
-# EEG backend indexing
+# EEG Research Workspace
 
-Primary data library for EEG files is `./eeg`.
+Локальная папка `./eeg` используется как **primary data library** проекта.
 
-## What backend does
+## Что делает backend
 
-- Automatically scans `./eeg` on first startup.
-- Recursively indexes `.edf` and `.EDF` files in all nested folders.
-- For each file calculates SHA-256 hash, parses basic EDF metadata, infers recording type (`baseline`, `stimulation`, `deidentified`, `unknown`) and stores record in SQLite.
-- Avoids duplicate records for already indexed files.
-- Supports manual reindex command and background sync loop.
+- При старте автоматически сканирует `./eeg`.
+- Рекурсивно индексирует `.edf` и `.EDF`.
+- Для каждого файла вычисляет SHA-256, извлекает EDF metadata, определяет тип записи (`baseline`, `stimulation`, `deidentified`, `unknown`) и сохраняет в SQLite.
+- Не дублирует уже проиндексированные файлы.
+- Поддерживает ручной `reindex` и фоновую синхронизацию для новых файлов.
 
-## Run
+## Веб-приложение (исследовательский интерфейс)
+
+- Просмотр сырых EEG-сигналов выбранного интервала.
+- Перерасчёт признаков по выделенному сегменту.
+- PSD, spectrogram, band powers, derived metrics.
+- Осторожное автоматически сгенерированное психофизиологическое описание (не клинический диагноз).
+- Сравнение респондент vs респондент.
+- Сравнение baseline vs stimulation для одного респондента.
+- Экспорт результатов в JSON/CSV.
+
+## Важно
+
+Этот интерфейс предназначен для исследовательской и экспертной работы.
+**Не является медицинской диагностической системой.**
+
+## Запуск
 
 ```bash
 pip install -r requirements.txt
 uvicorn backend.app:app --reload
 ```
 
-## Reindex command
+Откройте: `http://127.0.0.1:8000/`
+
+## Ручной reindex
 
 ```bash
 python -m backend.cli reindex
